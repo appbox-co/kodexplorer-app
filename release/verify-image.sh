@@ -1,6 +1,6 @@
 #!/bin/bash
-# Release gate for Kodbox 1.70.03: the deployed kodbox:1.70.02-2 image with
-# Kodbox 1.70.03 (CyloTech/kodbox appbox-1.70.03) in /kod_sources.
+# Release gate for Kodbox 1.71.02: the deployed kodbox:1.70.02-2 image with
+# Kodbox 1.71.02 (CyloTech/kodbox appbox-1.71.02) in /kod_sources.
 #
 # Usage: release/verify-image.sh <registry>/<repository>:<tag>
 #
@@ -16,10 +16,11 @@
 # Checks:
 #   image    built on the 1.70.02-2 layers; same packages, PHP modules,
 #            command and environment; /kod_sources is exactly the files in
-#            release/kod_sources-1.70.03.sha256 (Kodbox 1.70.03); the install
+#            release/kod_sources-1.71.02.sha256 (Kodbox 1.71.02); the install
 #            scripts are the repository's; kod.sh has no tracing and no HTTP
 #            install; tests/test-installed-callback.sh passes.
-#   fresh    new volumes, dummy ADMIN_PASS with "-", "+", "&", "%", "#", "=":
+#   fresh    new volumes, dummy ADMIN_PASS with "-", "+", "&", "%", "#", "=",
+#            a double quote, a backslash, a single quote and "$":
 #            install/index/save requests sent from the moment the container
 #            starts are never accepted (nothing listens during the install,
 #            Kodbox rejects them afterwards); the administrator logs in with
@@ -31,15 +32,16 @@
 #   weak     an ADMIN_PASS Kodbox refuses stops the first start: the container
 #            exits, nothing is served, no callback is marked, install.lock and
 #            setting_user.php are absent, and a second start fails the same way.
-#   upgrade  run twice, from 1.70.02-1 and from 1.70.02-2: the old image
-#            installs on new volumes and gets a second user; the candidate on
-#            the same volumes, with a different ADMIN_PASS, runs Kodbox 1.70.03,
+#   upgrade  run three times, from 1.70.02-1, 1.70.02-2 and 1.70.03: the old
+#            image installs on new volumes and gets a second user; the candidate
+#            on the same volumes, with a different ADMIN_PASS, runs Kodbox 1.71.02,
 #            keeps the database, both users and their passwords, does not
 #            install again and sends the installed callback.
 #
 # Containers run with --network none; each has its own mock installed-callback
 # API inside it (APPBOX_CALLBACK_BASE). Every container and volume this script
-# creates is named kodbox-gate-<run id>-* and removed on exit.
+# creates is named kodbox-gate-<run id>-*, labelled cylo.job=<CYLO_BUILD_JOB>
+# (the builder job id, or the run id when it is unset) and removed on exit.
 set -u -o pipefail
 
 # The deployed 1.70.02-2 image (the current default) this release is built FROM.
@@ -47,6 +49,8 @@ BASE_IMAGE=repo.cylo.net/kodbox@sha256:60e5b07d8db4e8bafe723c856f374a8c11884fb4c
 # The deployed 1.70.02-1 image, still installed on customer instances; the
 # upgrade is tested from it as well.
 OLD_IMAGE=repo.cylo.net/kodbox@sha256:8e6cd075d8e360f5b0d8832b077ee315c2fd9544fc795e7be96181c227bd16ed
+# The deployed 1.70.03 image, the current default this release replaces.
+PREV_IMAGE=repo.cylo.net/kodbox@sha256:215a4cf92f00cf9af5e82178dfa79f82dadbd1b3856b5732f6106cb2cb5484eb
 WEB_TIMEOUT=${GATE_WEB_TIMEOUT:-900}
 
 failures=0
@@ -70,6 +74,9 @@ release_dir=$(cd "$(dirname "$0")" && pwd)
 repo_dir=$(dirname "$release_dir")
 
 run_id=kodbox-gate-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
+job_id=${CYLO_BUILD_JOB:-$run_id}
+case "$job_id" in ''|*[!A-Za-z0-9._-]*) die "invalid CYLO_BUILD_JOB: $job_id" ;; esac
+job_label="cylo.job=$job_id"
 work_dir=$(mktemp -d)
 containers=()
 volumes=()
@@ -83,14 +90,16 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 docker image inspect "$image_ref" >/dev/null 2>&1 || die "$image_ref is not a local image"
-for ref in "$BASE_IMAGE" "$OLD_IMAGE"; do
+for ref in "$BASE_IMAGE" "$OLD_IMAGE" "$PREV_IMAGE"; do
     docker image inspect "$ref" >/dev/null 2>&1 || docker pull -q "$ref" >/dev/null \
         || die "cannot read the image $ref"
 done
-[ -s "$release_dir/kod_sources-1.70.03.sha256" ] || die "release/kod_sources-1.70.03.sha256 is missing"
+[ -s "$release_dir/kod_sources-1.71.02.sha256" ] || die "release/kod_sources-1.71.02.sha256 is missing"
 
 # Dummy credentials for the throwaway test containers only.
-fresh_pass='-Gate+Pw&1%2B#Q=z'
+# Every character the dashboard's complex password allows that a shell, URL or
+# JSON encoder could mangle: - + & % # = " \ ' $
+fresh_pass='-Gate+Pw&1%2B#Q=z"\$'"'"'x'
 attacker_pass='Att4ck3r!Pass'
 old_pass='OldGate1!pass'
 new_pass='NewGate2!pass'
@@ -138,14 +147,14 @@ done
 '
 
 new_volume() {
-    docker volume create "$1" >/dev/null || die "cannot create volume $1"
+    docker volume create --label "$job_label" "$1" >/dev/null || die "cannot create volume $1"
     volumes+=("$1")
 }
 
 # start_container <name> <image> <env file> <public_html volume> <data volume>
 start_container() {
     containers+=("$1")
-    docker run -d --name "$1" --network none --env-file "$3" \
+    docker run -d --name "$1" --label "$job_label" --network none --env-file "$3" \
         -v "$4:/home/appbox/public_html" -v "$5:/home/appbox/data" "$2" >/dev/null
 }
 
@@ -256,9 +265,9 @@ for f in /scripts/install/kod.sh /scripts/install/kodbox-install-step.php /scrip
 done
 echo "@@end"
 '
-docker run --rm --network none --entrypoint sh "$BASE_IMAGE" -c "$report_sh" > "$work_dir/base-report" \
+docker run --rm --label "$job_label" --network none --entrypoint sh "$BASE_IMAGE" -c "$report_sh" > "$work_dir/base-report" \
     || die "cannot read the 1.70.02-2 image"
-docker run --rm --network none --entrypoint sh "$image_ref" -c "$report_sh" > "$work_dir/image-report" \
+docker run --rm --label "$job_label" --network none --entrypoint sh "$image_ref" -c "$report_sh" > "$work_dir/image-report" \
     || die "cannot read $image_ref"
 section() { awk -v s="@@$1" '$0 == s {on = 1; next} /^@@/ {on = 0} on' "$2"; }
 for part in packages php-fpm8.3 php8.3 kod_sources; do
@@ -279,22 +288,22 @@ for sapi in php-fpm8.3 php8.3; do
     fi
 done
 LC_ALL=C sort "$work_dir/image-kod_sources" > "$work_dir/image-kod_sources.sorted"
-LC_ALL=C sort "$release_dir/kod_sources-1.70.03.sha256" > "$work_dir/want-kod_sources"
+LC_ALL=C sort "$release_dir/kod_sources-1.71.02.sha256" > "$work_dir/want-kod_sources"
 if [ "$(wc -l < "$work_dir/want-kod_sources")" -gt 3000 ] \
     && cmp -s "$work_dir/want-kod_sources" "$work_dir/image-kod_sources.sorted"; then
-    pass "/kod_sources is exactly release/kod_sources-1.70.03.sha256 ($(wc -l < "$work_dir/image-kod_sources") files)"
+    pass "/kod_sources is exactly release/kod_sources-1.71.02.sha256 ($(wc -l < "$work_dir/image-kod_sources") files)"
 else
-    fail "/kod_sources differs from release/kod_sources-1.70.03.sha256"
+    fail "/kod_sources differs from release/kod_sources-1.71.02.sha256"
     diff "$work_dir/want-kod_sources" "$work_dir/image-kod_sources.sorted" | head -20 >&2
 fi
-if docker run --rm --network none --entrypoint sh "$image_ref" -c \
-    "grep -qF \"define('KOD_VERSION','1.70');\" /kod_sources/config/version.php && grep -qF \"define('KOD_VERSION_BUILD','03');\" /kod_sources/config/version.php"; then
-    pass "/kod_sources/config/version.php is Kodbox 1.70.03"
+if docker run --rm --label "$job_label" --network none --entrypoint sh "$image_ref" -c \
+    "grep -qF \"define('KOD_VERSION','1.71');\" /kod_sources/config/version.php && grep -qF \"define('KOD_VERSION_BUILD','02');\" /kod_sources/config/version.php"; then
+    pass "/kod_sources/config/version.php is Kodbox 1.71.02"
 else
-    fail "/kod_sources/config/version.php is not Kodbox 1.70.03"
+    fail "/kod_sources/config/version.php is not Kodbox 1.71.02"
 fi
 changed=$(LC_ALL=C sort "$work_dir/base-kod_sources" | diff - "$work_dir/want-kod_sources" | grep -c '^[<>]')
-echo "/kod_sources: $changed manifest lines differ from 1.70.02-2 (upstream 1.70.02 to 1.70.03 changes 12 files; 1.70.02-2 also holds five .DS_Store files)"
+echo "/kod_sources: $changed manifest lines differ from 1.70.02-2 (upstream 1.70.02 to 1.71.02 changes 57 files; 1.70.02-2 also holds five .DS_Store files)"
 script_check() {
     local repo_file=$1 image_file=$2 want_mode=$3 want_sum
     want_sum=$(sha256sum "$repo_dir/$repo_file" | cut -d' ' -f1)
@@ -449,7 +458,7 @@ for attempt in 1 2; do
     if wait_for_exit "$weak"; then
         code=$(docker inspect -f '{{.State.ExitCode}}' "$weak")
         logs=$(docker logs "$weak" 2>&1)
-        state=$(docker run --rm --network none -v "$weak-ph:/ph" -v "$weak-data:/data" --entrypoint sh "$BASE_IMAGE" \
+        state=$(docker run --rm --label "$job_label" --network none -v "$weak-ph:/ph" -v "$weak-data:/data" --entrypoint sh "$BASE_IMAGE" \
             -c 'ls /data/system/install.lock /ph/config/setting_user.php 2>/dev/null | wc -l')
         pending=absent
         docker cp "$weak:/etc/appbox_callback_pending" - >/dev/null 2>&1 && pending=present
@@ -494,7 +503,8 @@ upgrade_from() {
         fi
         docker exec "$up-old" sh -c '/usr/sbin/php-fpm8.3 --fpm-config /home/appbox/config/php-fpm/php-fpm.conf; /usr/sbin/nginx -c /home/appbox/config/nginx/nginx.conf'
     else
-        # 1.70.02-2 installs from the command line before its web server starts.
+        # 1.70.02-2 and 1.70.03 install from the command line before their web
+        # server starts.
         write_env "$work_dir/old.env" "$old_pass"
         start_container "$up-old" "$old_image" "$work_dir/old.env" "$up-ph" "$up-data" || die "cannot start $up-old"
         start_mock "$up-old"
@@ -531,10 +541,10 @@ upgrade_from() {
         return
     fi
     pass "the candidate serves Kodbox on the $label volumes"
-    if docker exec "$up-new" sh -c "grep -qF \"define('KOD_VERSION_BUILD','03');\" /home/appbox/public_html/config/version.php"; then
-        pass "the updated instance runs Kodbox 1.70.03"
+    if docker exec "$up-new" sh -c "grep -qF \"define('KOD_VERSION','1.71');\" /home/appbox/public_html/config/version.php && grep -qF \"define('KOD_VERSION_BUILD','02');\" /home/appbox/public_html/config/version.php"; then
+        pass "the updated instance runs Kodbox 1.71.02"
     else
-        fail "the updated instance does not run Kodbox 1.70.03"
+        fail "the updated instance does not run Kodbox 1.71.02"
     fi
     logs=$(docker logs "$up-new" 2>&1)
     if echo "$logs" | grep -q '^Kodbox is already installed: keeping the existing data and administrator$' \
@@ -590,6 +600,7 @@ upgrade_from() {
 
 upgrade_from 1.70.02-1 "$OLD_IMAGE" http v1
 upgrade_from 1.70.02-2 "$BASE_IMAGE" cli v2
+upgrade_from 1.70.03 "$PREV_IMAGE" cli v3
 
 echo "== Registry tag must not exist"
 registry=${registry_ref%%/*}
@@ -609,8 +620,8 @@ registry_get() {
 }
 api_status=$(registry_get /v2/) || die "registry unreachable"
 [ "$api_status" = 200 ] || die "registry API check returned HTTP $api_status"
-base_status=$(registry_get "/v2/$repository/manifests/1.70.02-2") || die "registry unreachable"
-[ "$base_status" = 200 ] || die "registry cannot read the existing 1.70.02-2 tag (HTTP $base_status); state is indeterminate"
+base_status=$(registry_get "/v2/$repository/manifests/1.70.03") || die "registry unreachable"
+[ "$base_status" = 200 ] || die "registry cannot read the existing 1.70.03 tag (HTTP $base_status); state is indeterminate"
 manifest_status=$(registry_get "/v2/$repository/manifests/$tag") || die "registry unreachable"
 case "$manifest_status" in
     200) fail "$registry_ref already exists in the registry" ;;
