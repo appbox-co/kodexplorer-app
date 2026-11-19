@@ -1,5 +1,5 @@
 #!/bin/sh
-# Release gate for KODExplorer 4.35-7: the deployed 4.35-6 image with its
+# Release gate for KODExplorer 4.35-8: the deployed 4.35-6 image with its
 # php7.2 packages replaced by the local rebuild from stage 1.
 #
 # Usage: release/verify-image.sh <registry>/<repository>:<tag>
@@ -14,8 +14,8 @@
 set -eu
 
 # The exact php7.2 build this release ships (Ubuntu's last public bionic
-# source plus php72-patches/, local suffix +cylo2).
-EXPECTED_PHP72_VERSION=7.2.24-0ubuntu0.18.04.17+cylo2
+# source plus php72-patches/, local suffix +cylo3).
+EXPECTED_PHP72_VERSION=7.2.24-0ubuntu0.18.04.17+cylo3
 # Install scripts. 30_installer.sh is the deployed 4.35-6 file; kod.sh is the
 # deployed file (DEPLOYED_KOD_SH_SHA256) plus the guard that keeps installed
 # KODExplorer 4.x code and the admin account on a recreated container
@@ -96,8 +96,8 @@ fi
 fpm_version=$(in_image php-fpm7.2 -v | head -1)
 echo "$fpm_version"
 case "$fpm_version" in
-    "PHP 7.2.24-0ubuntu0.18.04.17+cylo2 "*) pass "php-fpm7.2 -v reports 7.2.24-0ubuntu0.18.04.17+cylo2" ;;
-    *) fail "php-fpm7.2 is not the +cylo2 rebuild" ;;
+    "PHP 7.2.24-0ubuntu0.18.04.17+cylo3 "*) pass "php-fpm7.2 -v reports 7.2.24-0ubuntu0.18.04.17+cylo3" ;;
+    *) fail "php-fpm7.2 is not the +cylo3 rebuild" ;;
 esac
 if [ -n "$packages" ]; then
     echo "$packages" | sed 's/^/installed: /'

@@ -1,4 +1,4 @@
-# KODExplorer 4.35-7: the deployed 4.35-6 image (Ubuntu 18.04, built
+# KODExplorer 4.35-8: the deployed 4.35-6 image (Ubuntu 18.04, built
 # 2020-09-29) with its php7.2 packages replaced by a local rebuild.
 #
 # Stage 1 rebuilds Ubuntu's last public bionic php7.2 source package with the
@@ -22,9 +22,13 @@
 # admin account on a recreated container, instead of resetting them to the
 # 4.40 code in Git. scripts/05_run_php.sh recreates /run/php on every start,
 # because the platform mounts a tmpfs on /run in new containers.
+#
+# 4.35-8 is 4.35-7 rebuilt as +cylo3, adding php72-patches/0002 (the
+# php-src security fixes of 19 November 2026 that apply to 7.2), identical
+# to rutorrent-app's php72-cylo3 branch.
 
 ARG PHP72_SOURCE_VERSION=7.2.24-0ubuntu0.18.04.17
-ARG PHP72_LOCAL_SUFFIX=+cylo2
+ARG PHP72_LOCAL_SUFFIX=+cylo3
 ARG KODEXPLORER_BASE=repo.cylo.net/kodexplorer@sha256:5bd139e6840bcf3db09c27a11a6deae1db15398d90d25ae9e9c4c6ec59eac7af
 
 FROM ubuntu:18.04@sha256:152dc042452c496007f07ca9127571cb9c29697f42acbfad72324b2bb2e43c98 AS php72-build

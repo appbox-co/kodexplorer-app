@@ -1,12 +1,12 @@
 #!/bin/bash
-# Build KODExplorer 4.35-7 on the Appbox builder from the pushed commit, run
+# Build KODExplorer 4.35-8 on the Appbox builder from the pushed commit, run
 # the release gate and push only if it passes.
 #
 # Usage (from a clean checkout of this branch, HEAD pushed to origin):
 #   release/builder-release.sh
 #
 # The build context is `git archive HEAD` of the repository, checked by
-# sha256 on the builder. The image is built as repo.cylo.net/kodexplorer:4.35-7
+# sha256 on the builder. The image is built as repo.cylo.net/kodexplorer:4.35-8
 # with --no-cache, gated with release/verify-image.sh and pushed; the pushed
 # digest is printed. Nothing is pushed when the gate fails.
 set -euo pipefail
@@ -16,11 +16,11 @@ fail() {
     exit 1
 }
 
-image_ref=repo.cylo.net/kodexplorer:4.35-7
+image_ref=repo.cylo.net/kodexplorer:4.35-8
 slug=kodexplorer-app
-tag=4.35-7
-builder=appbox@builder1.builder.appboxes.co
-builder_port=10112
+tag=4.35-8
+builder=appbox@builder.grant.appboxes.co
+builder_port=12246
 ssh_opts=(-i /Users/rid/.ssh/appbox_ubuntuvps2_webtop -o IdentitiesOnly=yes -o BatchMode=yes
           -o ConnectTimeout=15 -o ServerAliveInterval=30 -o StrictHostKeyChecking=yes)
 
@@ -64,7 +64,7 @@ ssh -p "$builder_port" "${ssh_opts[@]}" "$builder" \
     "cd '$remote_dir' && printf '%s  context.tgz\n' '$archive_sha' | sha256sum -c - && mkdir context && tar xzf context.tgz -C context"
 ssh -p "$builder_port" "${ssh_opts[@]}" "$builder" \
     "cd '$remote_dir/context' && \
-    docker build --no-cache --platform linux/amd64 --progress=plain -t '$image_ref' . > '$remote_dir/build.log' 2>&1 \
+    docker build --builder default --no-cache --platform linux/amd64 --progress=plain -t '$image_ref' . > '$remote_dir/build.log' 2>&1 \
         || { tail -60 '$remote_dir/build.log'; exit 1; }; \
     tail -5 '$remote_dir/build.log'; \
     sh ./release/verify-image.sh '$image_ref' && \
