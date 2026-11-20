@@ -125,10 +125,12 @@ else
 fi
 echo "-- php8.3-common changelog, latest entry"
 in_image_sh -c 'zcat /usr/share/doc/php8.3-common/changelog.Debian.gz | sed -n "1,/^ --/p"' || true
-if in_image_sh -c 'zcat /usr/share/doc/php8.3-common/changelog.Debian.gz | sed -n "1,/^ --/p" | grep -q "CVE-2026-109618" && zcat /usr/share/doc/php8.3-common/changelog.Debian.gz | sed -n "1,/^ --/p" | grep -q "109619"'; then
-    pass "the latest php8.3 changelog entry names CVE-2026-109618 and CVE-2026-109619"
+# Ubuntu's php8.3 fix of 20 November 2026 (8.3.6-0ubuntu0.24.04.14) names these.
+NOV_CVES="CVE-2026-115560 CVE-2026-126714 CVE-2026-127960 CVE-2026-128064 CVE-2026-128090 CVE-2026-129289 CVE-2026-129291 CVE-2026-129292 CVE-2026-129481 CVE-2026-129496 CVE-2026-129506 CVE-2026-129538 CVE-2026-15353"
+if in_image_sh -c 'e=$(zcat /usr/share/doc/php8.3-common/changelog.Debian.gz | sed -n "1,/^ --/p"); for c in '"$NOV_CVES"'; do echo "$e" | grep -q "$c" || exit 1; done'; then
+    pass "the latest php8.3 changelog entry names all 13 CVEs of the 19 November release"
 else
-    fail "the latest php8.3 changelog entry does not name CVE-2026-109618 and CVE-2026-109619"
+    fail "the latest php8.3 changelog entry does not name all 13 CVEs of the 19 November release"
 fi
 
 echo "== Packages changed from the deployed image"
