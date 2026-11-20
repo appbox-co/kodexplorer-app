@@ -1,33 +1,28 @@
-# Kodbox 1.71.02: the deployed kodbox:1.70.02-2 image with Kodbox 1.71.02 in
-# /kod_sources, built the same way as 1.70.03.
+# Kodbox 1.71.02-1: the deployed kodbox:1.71.02 image with only its php8.3
+# packages upgraded from Ubuntu noble-security, for the PHP security release
+# of 19 November 2026 (Ubuntu's fix: 8.3.6-0ubuntu0.24.04.14, 20 November).
 #
-# The base is the exact image every 1.70.02-2 instance runs, pinned by digest,
-# so PHP 8.3, the packages, the configuration, CMD and environment stay as they
-# were. /kod_sources is replaced by upstream Kodbox 1.71.02 with the Appbox
-# changes, CyloTech/kodbox branch appbox-1.71.02, pinned by commit. kod.sh
-# copies it into public_html on the first start of each new container and
-# keeps config/setting_user.php and the data volume, as for earlier releases.
-#
-# The install scripts and the installed-callback service are copied from this
-# repository as in 1.70.02-2; they are unchanged, so the files are the ones the
-# base already holds.
-#
-# release/verify-image.sh is the release gate.
-
-FROM repo.cylo.net/kodbox@sha256:60e5b07d8db4e8bafe723c856f374a8c11884fb4c83349f52c2e56293f564d51
-
-RUN rm -rf /kod_sources
-ADD https://github.com/CyloTech/kodbox.git#b054495dcfdc07ad33fdd519303d24bf3f2d660e /kod_sources
-
-COPY --chmod=755 scripts/kod.sh /scripts/install/kod.sh
-COPY --chmod=644 scripts/kodbox-install-step.php /scripts/install/kodbox-install-step.php
-COPY --chmod=644 scripts/kodbox-install-check.php /scripts/install/kodbox-install-check.php
-COPY --chmod=755 scripts/30_installer.sh /etc/my_init.d/30_installer.sh
-
-# Appbox installed callback: 30_installer.sh only marks it pending and this
-# runit service sends it after my_init.d, so it can never block startup.
-COPY scripts/appbox-installed-callback /usr/local/bin/appbox-installed-callback
-COPY scripts/appbox-callback-run /etc/service/appbox-callback/run
-RUN chmod 755 /usr/local/bin/appbox-installed-callback /etc/service/appbox-callback/run
-
-LABEL net.cylo.kodbox-release="1.71.02"
+# The base is the exact image every 1.71.02 instance runs, pinned by digest,
+# so Kodbox (/kod_sources), the install scripts, the PHP extensions and the
+# configuration stay as they were. Nothing else from this repository goes
+# into the image. release/verify-image.sh is the release gate.
+ARG PHP83_MIN_VERSION=8.3.6-0ubuntu0.24.04.14
+FROM repo.cylo.net/kodbox@sha256:b161557dd488a25285fda4d999f07a3eac8295c4a6ee8b78da05e6656438d4a1
+ARG PHP83_MIN_VERSION
+# Upgrade exactly the installed packages built from the php8.3 source
+# package. Conffiles the image already has are kept.
+RUN set -eu; \
+    pkgs=$(dpkg-query -W -f='${db:Status-Abbrev}|${Package}|${source:Package}\n' \
+        | awk -F'|' '$1 ~ /^ii/ && $3 == "php8.3" {print $2}'); \
+    [ -n "$pkgs" ] || { echo "no php8.3 packages installed" >&2; exit 1; }; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --only-upgrade \
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold $pkgs; \
+    for pkg in $pkgs; do \
+        version=$(dpkg-query -W -f='${Version}' "$pkg"); \
+        dpkg --compare-versions "$version" ge "$PHP83_MIN_VERSION" \
+            || { echo "$pkg $version is older than $PHP83_MIN_VERSION" >&2; exit 1; }; \
+    done; \
+    rm -rf /var/lib/apt/lists/*; \
+    php-fpm8.3 -t
+LABEL net.cylo.php83-min-version="${PHP83_MIN_VERSION}"
